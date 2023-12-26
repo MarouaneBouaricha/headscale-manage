@@ -19,6 +19,23 @@ status_check() {
   fi
 }
 
+start_headscale() {
+  if [ -f "${SERVICE_FILE_PATH}" ]; then
+    systemctl start headscale
+    sleep 1s
+    status_check
+    if [ $? == ${STATUS_NOT_RUNNING} ]; then
+      echo "start headscale service failed,exit"
+      exit 1
+    elif [ $? == ${STATUS_RUNNING} ]; then
+      echo "start headscale service success"
+    fi
+  else
+    echo "${SERVICE_FILE_PATH} does not exist,can not start service"
+    exit 1
+  fi
+}
+
 show_status() {
   status_check
   case $? in
