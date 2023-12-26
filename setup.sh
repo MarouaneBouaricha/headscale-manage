@@ -53,6 +53,24 @@ restart_headscale() {
   fi
 }
 
+stop_headscale() {
+  echo "Stopping the headscale service..."
+  status_check
+  if [ $? == ${STATUS_NOT_INSTALL} ]; then
+    echo "headscale not found."
+    exit 1
+  elif [ $? == ${STATUS_NOT_RUNNING} ]; then
+    echo "headscale already stopped."
+    exit 1
+  elif [ $? == ${STATUS_RUNNING} ]; then
+    if ! systemctl stop headscale; then
+      echo "Stopping headscale service failed,please check the logs"
+      exit 1
+    fi
+  fi
+  echo "headscale service stopped."
+}
+
 show_status() {
   status_check
   case $? in
