@@ -7,6 +7,22 @@ pink='\033[1;35m'
 green='\033[0;32m'
 yellow='\033[0;33m'
 
+declare -r STATUS_RUNNING=1
+declare -r STATUS_NOT_RUNNING=0
+declare -r STATUS_NOT_INSTALL=255
+
+function LOGE() {
+  echo -e "${red}[ERR] $* ${plain}"
+}
+
+function LOGI() {
+  echo -e "${green}[INF] $* ${plain}"
+}
+
+function LOGD() {
+  echo -e "${yellow}[DEG] $* ${plain}"
+}
+
 status_check() {
   if [[ ! -f "${SERVICE_FILE_PATH}" ]]; then
     return ${STATUS_NOT_INSTALL}
@@ -25,13 +41,13 @@ start_headscale() {
     sleep 1s
     status_check
     if [ $? == ${STATUS_NOT_RUNNING} ]; then
-      echo "start headscale service failed,exit"
+      LOGE "start headscale service failed,exit"
       exit 1
     elif [ $? == ${STATUS_RUNNING} ]; then
-      echo "start headscale service success"
+      LOGI "start headscale service success"
     fi
   else
-    echo "${SERVICE_FILE_PATH} does not exist,can not start service"
+    LOGE "${SERVICE_FILE_PATH} does not exist,can not start service"
     exit 1
   fi
 }
@@ -42,33 +58,33 @@ restart_headscale() {
     sleep 1s
     status_check
     if [ $? == 0 ]; then
-      echo "restart headscale service failed,exit"
+      LOGE "restart headscale service failed,exit"
       exit 1
     elif [ $? == 1 ]; then
-      echo "restart headscale service success"
+      LOGI "restart headscale service success"
     fi
   else
-    echo "${SERVICE_FILE_PATH} does not exist,can not restart service"
+    LOGE "${SERVICE_FILE_PATH} does not exist,can not restart service"
     exit 1
   fi
 }
 
 stop_headscale() {
-  echo "Stopping the headscale service..."
+  LOGD "Stopping the headscale service..."
   status_check
   if [ $? == ${STATUS_NOT_INSTALL} ]; then
-    echo "headscale not found."
+    LOGE "headscale not found."
     exit 1
   elif [ $? == ${STATUS_NOT_RUNNING} ]; then
-    echo "headscale already stopped."
+    LOGI "headscale already stopped."
     exit 1
   elif [ $? == ${STATUS_RUNNING} ]; then
     if ! systemctl stop headscale; then
-      echo "Stopping headscale service failed,please check the logs"
+      LOGE "Stopping headscale service failed,please check the logs"
       exit 1
     fi
   fi
-  echo "headscale service stopped."
+  LOGD "headscale service stopped."
 }
 
 show_status() {
