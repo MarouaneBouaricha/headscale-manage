@@ -36,6 +36,23 @@ start_headscale() {
   fi
 }
 
+restart_headscale() {
+  if [ -f "${SERVICE_FILE_PATH}" ]; then
+    systemctl restart headscale
+    sleep 1s
+    status_check
+    if [ $? == 0 ]; then
+      echo "restart headscale service failed,exit"
+      exit 1
+    elif [ $? == 1 ]; then
+      echo "restart headscale service success"
+    fi
+  else
+    echo "${SERVICE_FILE_PATH} does not exist,can not restart service"
+    exit 1
+  fi
+}
+
 show_status() {
   status_check
   case $? in
