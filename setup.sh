@@ -35,15 +35,6 @@ status_check() {
   fi
 }
 
-enable_headscale() {
-  systemctl enable headscale
-  if [[ $? == 0 ]]; then
-    LOGI "Set headscale to start automatically after booting."
-  else
-    LOGE "Setting headscale to start automatically at boot fails."
-  fi
-}
-
 arch_check() {
   LOGI "Detecting the current system architecture..."
   OS_ARCH=$(arch)
@@ -249,19 +240,13 @@ randomize_client_port: false
 EOF
 }
 
-install_headscale() {
-  LOGD "Installing headscale..."
-  if [[ $# -ne 0 ]]; then
-    download_headscale $1
+enable_headscale() {
+  systemctl enable headscale
+  if [[ $? == 0 ]]; then
+    LOGI "Set headscale to start automatically after booting."
   else
-    download_headscale
+    LOGE "Setting headscale to start automatically at boot fails."
   fi
-
-  config_headscale
-  install_service
-
-  enable_headscale && start_headscale
-  LOGI "Headscale was successfully installed and started."
 }
 
 start_headscale() {
@@ -314,6 +299,42 @@ stop_headscale() {
     fi
   fi
   LOGD "headscale service stopped."
+}
+
+install_headscale() {
+  LOGD "Installing headscale..."
+  if [[ $# -ne 0 ]]; then
+    download_headscale $1
+  else
+    download_headscale
+  fi
+
+  config_headscale
+  install_service
+
+  enable_headscale && start_headscale
+  LOGI "Headscale was successfully installed and started."
+}
+
+
+uninstall_headscale() {
+  echo ""
+  LOGD "uninstalling headscale..."
+  pidOfheadscale=$(pidof headscale)
+  if [[ -n ${pidOfheadscale} ]]; then
+    stop_headscale
+  fi
+
+  create_or_delete_path 0 && rm -rf ${SERVICE_FILE_PATH} && rm -rf ${BINARY_FILE_PATH}
+  userdel -r headscale
+  groupdel headscale
+
+  if [ $? -ne 0 ]; then
+    LOGE "Failed to uninstall headscale, please check the log"
+    exit 1
+  else
+    LOGI "Headscale uninstalled successfully"
+  fi
 }
 
 show_status() {
