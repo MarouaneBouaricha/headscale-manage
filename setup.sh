@@ -35,6 +35,235 @@ status_check() {
   fi
 }
 
+enable_headscale() {
+  systemctl enable headscale
+  if [[ $? == 0 ]]; then
+    LOGI "Set headscale to start automatically after booting."
+  else
+    LOGE "Setting headscale to start automatically at boot fails."
+  fi
+}
+
+arch_check() {
+  LOGI "Detecting the current system architecture..."
+  OS_ARCH=$(arch)
+  LOGI "The current system architecture is ${OS_ARCH}"
+  if [[ ${OS_ARCH} == "x86_64" || ${OS_ARCH} == "x64" || ${OS_ARCH} == "amd64" ]]; then
+    OS_ARCH="amd64"
+  elif [[ ${OS_ARCH} == "aarch64" || ${OS_ARCH} == "arm64" ]]; then
+    OS_ARCH="arm64"
+  else
+    OS_ARCH="amd64"
+    LOGE "Failed to detect system architecture, using default architecture: ${OS_ARCH}"
+  fi
+  LOGI "The Detection is completed. The current system architecture is: ${OS_ARCH}"
+}
+
+create_or_delete_path() {
+  if [[ $# -ne 1 ]]; then
+    LOGE "invalid input,should be one paremete,and can be 0 or 1"
+    exit 1
+  fi
+  if [[ "$1" == "1" ]]; then
+    LOGI "Will create ${HOME_PATH} and ${DATA_PATH} and ${TEMP_PATH} for headscale..."
+    rm -rf ${HOME_PATH} ${DATA_PATH} ${TEMP_PATH} /home/headscale
+    mkdir -p ${HOME_PATH} ${DATA_PATH} ${TEMP_PATH} /home/headscale
+    if [[ $? -ne 0 ]]; then
+      LOGE "create ${HOME_PATH} and ${DATA_PATH} and ${TEMP_PATH} for headscale failed"
+      exit 1
+    else
+      LOGI "create ${HOME_PATH} adn ${DATA_PATH} and ${TEMP_PATH} for headscale success"
+    fi
+  elif [[ "$1" == "0" ]]; then
+    LOGI "Will delete ${HOME_PATH} and ${DATA_PATH} and ${TEMP_PATH}..."
+    rm -rf ${HOME_PATH} ${DATA_PATH} ${TEMP_PATH} /home/headscale
+    if [[ $? -ne 0 ]]; then
+      LOGE "delete ${HOME_PATH} and ${DATA_PATH} and ${TEMP_PATH} failed"
+      exit 1
+    else
+      LOGI "delete ${HOME_PATH} and ${DATA_PATH} and ${TEMP_PATH} success"
+    fi
+  fi
+}
+
+download_headscale() {
+  LOGD "Start downloading headscale..."
+  arch_check
+
+  local headscale_version_temp=$(curl -Ls "https://api.github.com/repos/juanfont/headscale/releases/latest" | grep '"tag_name":' | sed -E 's/.*"([^"]+)".*/\1/')
+  headscale_version=${headscale_version_temp:1}
+
+  LOGI "Will choose the version to use:${headscale_version}"
+  local DOWANLOAD_URL="https://github.com/juanfont/headscale/releases/download/${headscale_version_temp}/headscale_${headscale_version}_linux_${OS_ARCH}"
+
+  create_or_delete_path 1
+  wget --output-document=${BINARY_FILE_PATH} ${DOWANLOAD_URL}
+
+  chmod +x ${BINARY_FILE_PATH}
+
+  if [[ $? -ne 0 ]]; then
+    LOGE "Download headscale failed,please be sure that your network work properly and can access github"
+    create_or_delete_path 0
+    exit 1
+  else
+    LOGI "headscale downloaded successfully"
+  fi
+}
+
+install_service() {
+  LOGD "Creating the headscale systemd service..."
+  if [ -f "${SERVICE_FILE_PATH}" ]; then
+    rm -rf ${SERVICE_FILE_PATH}
+  fi
+  touch ${SERVICE_FILE_PATH}
+  if [ $? -ne 0 ]; then
+    LOGE "create service file failed,exit"
+    exit 1
+  else
+    LOGI "create service file success..."
+  fi
+  cat >${SERVICE_FILE_PATH} <<EOF
+[Unit]
+Description=headscale controller
+After=syslog.target
+After=network.target
+[Service]
+Type=simple
+User=headscale
+Group=headscale
+ExecStart=${BINARY_FILE_PATH} serve
+Restart=on-failure
+RestartSec=30s
+RestartPreventExitStatus=23
+LimitNPROC=10000
+LimitNOFILE=1000000
+
+NoNewPrivileges=yes
+PrivateTmp=yes
+ProtectSystem=strict
+ProtectHome=yes
+ReadWritePaths=${DATA_PATH} ${TEMP_PATH}
+AmbientCapabilities=CAP_NET_BIND_SERVICE
+RuntimeDirectory=headscale
+
+[Install]
+WantedBy=multi-user.target
+EOF
+  chmod 644 ${SERVICE_FILE_PATH}
+  systemctl daemon-reload
+  LOGD "The headscale systemd service was created successfully"
+}
+
+config_headscale() {
+  touch ${DATA_PATH}/db.sqlite
+
+  useradd headscale -d /home/headscale -m
+  chown -R headscale:headscale ${DATA_PATH}
+
+  touch ${HOME_PATH}/config.yaml
+  if [ $? -ne 0 ]; then
+    LOGE "create config.yaml file failed,exit"
+    exit 1
+  else
+    LOGI "create config.yaml file success..."
+  fi
+
+  ip=`0.0.0.0`
+
+  echo ""
+  read -p "Please enter the service port [a number from 100-65535, default 8080]:" port
+  [[ -z "${port}" ]] && port=8080
+  if [[ "${port:0:1}" = "0" ]]; then
+    LOGE "Port cannot start with 0${plain}"
+    exit 1
+  fi
+  LOGI " The service address is：http://${ip}:${port}"
+
+  cat >${HOME_PATH}/config.yaml <<EOF
+server_url: http://${ip}:${port}
+listen_addr: 0.0.0.0:${port}
+metrics_listen_addr: 127.0.0.1:9090
+
+grpc_listen_addr: 0.0.0.0:50443
+grpc_allow_insecure: false
+
+private_key_path: ${DATA_PATH}/private.key
+noise:
+  private_key_path: ${DATA_PATH}/noise_private.key
+
+ip_prefixes:
+  - fd7a:115c:a1e0::/48
+  - 100.64.0.0/24
+
+derp:
+  server:
+    enabled: false
+    region_id: 999
+    region_code: "headscale"
+    region_name: "Headscale Embedded DERP"
+    stun_listen_addr: "0.0.0.0:3478"
+  urls:
+    - https://controlplane.tailscale.com/derpmap/default
+  paths: []
+  auto_update_enabled: true
+  update_frequency: 24h
+
+disable_check_updates: false
+ephemeral_node_inactivity_timeout: 30m
+node_update_check_interval: 10s
+
+db_type: sqlite3
+db_path: ${DATA_PATH}/db.sqlite
+
+acme_url: https://acme-v02.api.letsencrypt.org/directory
+acme_email: ""
+tls_letsencrypt_hostname: ""
+tls_client_auth_mode: relaxed
+tls_letsencrypt_cache_dir: ${DATA_PATH}/cache
+tls_letsencrypt_challenge_type: HTTP-01
+tls_letsencrypt_listen: ":http"
+tls_cert_path: ""
+tls_key_path: ""
+
+log:
+  format: text
+  level: info
+
+acl_policy_path: ""
+
+dns_config:
+  override_local_dns: true
+  nameservers:
+    - 8.8.8.8
+  domains: []
+  magic_dns: false
+  base_domain: example.com
+
+unix_socket: ${TEMP_PATH}/headscale.sock
+unix_socket_permission: "0770"
+
+logtail:
+  enabled: false
+
+randomize_client_port: false
+EOF
+}
+
+install_headscale() {
+  LOGD "Installing headscale..."
+  if [[ $# -ne 0 ]]; then
+    download_headscale $1
+  else
+    download_headscale
+  fi
+
+  config_headscale
+  install_service
+
+  enable_headscale && start_headscale
+  LOGI "Headscale was successfully installed and started."
+}
+
 start_headscale() {
   if [ -f "${SERVICE_FILE_PATH}" ]; then
     systemctl start headscale
